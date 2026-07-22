@@ -1,4 +1,6 @@
 import sharp from "sharp";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import type { Copy, DitherSettings } from "./types.js";
 
 const W = 1600, H = 1600;
@@ -30,6 +32,11 @@ async function ditherSvg(image: Buffer, settings: DitherSettings) {
 export async function renderPoster(image: Buffer, copy: Copy, settings: DitherSettings) {
   const photo = await ditherSvg(image, settings);
   const topic = lines(copy.topic).map((line, i) => `<text x="66" y="${1220 + i * 44}" class="body">${line}</text>`).join("");
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><style>.mono{font:27px monospace;fill:#222}.name{font:700 53px Arial;fill:#222}.body{font:400 33px Arial;fill:#222}.small{font:500 30px Arial;fill:#222}</style><rect width="1600" height="1600" fill="#eaeaea"/>${photo}<rect x="65" y="39" width="${Math.max(180, copy.handle.length * 17 + 28)}" height="43" rx="22" fill="none" stroke="#222"/><text x="79" y="68" class="mono">${esc(copy.handle)}</text><text x="65" y="1105" class="name">${esc(copy.name.toUpperCase())}</text><text x="66" y="1172" class="body">${esc(copy.company)}</text>${topic}<g transform="translate(1120 988) rotate(-4)"><rect width="340" height="148" rx="14" fill="#f15a24"/><text x="44" y="92" style="font:700 64px Arial;fill:white">SLA</text></g><text x="65" y="1544" class="small">${esc(copy.date)}</text><text x="1535" y="1544" text-anchor="end" class="small">${esc(copy.social)}</text></svg>`;
+  const logo = (await readFile(resolve(process.cwd(), "public", "slaorange.png"))).toString("base64");
+  const pill = (text: string, x: number, width: number, anchor = "start") => `<rect x="${anchor === "end" ? x - width : x}" y="39" width="${width}" height="43" rx="22" fill="none" stroke="#222"/><text x="${anchor === "end" ? x - width + 14 : x + 14}" y="68" class="mono">${esc(text)}</text>`;
+  const handleWidth = Math.max(170, copy.handle.length * 17 + 28);
+  const roleWidth = Math.max(170, copy.role.length * 17 + 28);
+  const sponsorWidth = Math.max(140, copy.sponsor.length * 17 + 28);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><style>.mono{font-family:"DejaVu Sans", "Liberation Sans", sans-serif;font-size:27px;fill:#222}.name{font-family:"DejaVu Sans", "Liberation Sans", sans-serif;font-size:53px;font-weight:700;fill:#222}.body{font-family:"DejaVu Sans", "Liberation Sans", sans-serif;font-size:33px;font-weight:400;fill:#222}.small{font-family:"DejaVu Sans", "Liberation Sans", sans-serif;font-size:30px;font-weight:500;fill:#222}</style><rect width="1600" height="1600" fill="#eaeaea"/>${pill(copy.handle, 65, handleWidth)}${pill(copy.role, 65 + handleWidth + 8, roleWidth)}${pill(copy.sponsor, 1535, sponsorWidth, "end")}${photo}<text x="65" y="1105" class="name">${esc(copy.name.toUpperCase())}</text><text x="66" y="1172" class="body">${esc(copy.company)}</text>${topic}<image href="data:image/png;base64,${logo}" x="1120" y="988" width="340" height="148" transform="rotate(-4 1120 988)" preserveAspectRatio="none"/><text x="65" y="1544" class="small">${esc(copy.date)}</text><text x="1535" y="1544" text-anchor="end" class="small">${esc(copy.social)}</text></svg>`;
   return sharp(Buffer.from(svg)).png().toBuffer();
 }
