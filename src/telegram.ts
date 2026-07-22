@@ -5,6 +5,7 @@ import { Store } from "./store.js";
 
 type TelegramMessage = { chat: { id: number }; text?: string; photo?: Array<{ file_id: string }> };
 type TelegramUpdate = { message?: TelegramMessage; callback_query?: { id: string; data?: string; message?: TelegramMessage } };
+const DEFAULT_SOCIAL = "@slatv_ @ceiboargentina";
 
 export class TelegramAgent {
   constructor(private token: string, private store: Store, private originalWebUrl: string, private publicUrl: string) {}
@@ -26,7 +27,14 @@ export class TelegramAgent {
   private nextField(copy: Partial<Copy>) { return FIELD_ORDER.find((field) => !copy[field]); }
   private prompt(field: keyof Copy) { return `¿Cuál es el ${FIELD_LABELS[field]}?`; }
   private async downloadPhoto(fileId: string) { const file = await this.api("getFile", { file_id: fileId }); const path = file.result?.file_path; if (!path) throw new Error("Telegram no devolvió la ruta de la foto"); const response = await fetch(`https://api.telegram.org/file/bot${this.token}/${path}`); return Buffer.from(await response.arrayBuffer()); }
-  private keyboard() { return { inline_keyboard: [[{ text: "Cambiar datos", callback_data: "reset" }, { text: "Editar manualmente", url: this.originalWebUrl }]] }; }
+  private keyboard() {
+    const row: Array<Record<string, string>> = [{ text: "Cambiar datos", callback_data: "reset" }];
+    try {
+      const url = new URL(this.originalWebUrl);
+      if (url.protocol === "https:") row.push({ text: "Editar manualmente", url: url.toString() });
+    } catch { /* La placa se puede enviar aunque la web original aún no esté publicada. */ }
+    return { inline_keyboard: [row] };
+  }
   async handle(update: TelegramUpdate) {
     const message = update.message ?? update.callback_query?.message;
     if (!message) return;
@@ -34,7 +42,7 @@ export class TelegramAgent {
     if (update.callback_query) { await this.api("answerCallbackQuery", { callback_query_id: update.callback_query.id }); if (update.callback_query.data === "reset") { this.store.clear(chatId); await this.send(chatId, "Perfecto. Enviame una nueva foto para empezar."); } return; }
     if (message.text === "/start" || message.text === "/reset") { this.store.clear(chatId); await this.send(chatId, "Soy el agente de placas de SLA. Enviame la foto del invitado para empezar."); return; }
     let session = this.store.get(chatId) ?? { chatId, photo: null, copy: {}, awaiting: "photo", updatedAt: new Date().toISOString() } satisfies Session;
-    if (message.photo?.length) { session.photo = await this.downloadPhoto(message.photo.at(-1)!.file_id); session.awaiting = this.nextField(session.copy) ?? null; session.updatedAt = new Date().toISOString(); this.store.save(session); await this.send(chatId, this.prompt(session.awaiting as keyof Copy)); return; }
+    if (message.photo?.length) { session.copy.social ??= DEFAULT_SOCIAL; session.photo = await this.downloadPhoto(message.photo.at(-1)!.file_id); session.awaiting = this.nextField(session.copy) ?? null; session.updatedAt = new Date().toISOString(); this.store.save(session); await this.send(chatId, session.awaiting ? this.prompt(session.awaiting as keyof Copy) : "Estoy generando la placa…"); return; }
     if (!message.text) { await this.send(chatId, "Necesito una foto o un texto para continuar."); return; }
     if (!session.photo) { await this.send(chatId, "Primero enviame la foto del invitado."); return; }
     const field = session.awaiting ?? this.nextField(session.copy);
