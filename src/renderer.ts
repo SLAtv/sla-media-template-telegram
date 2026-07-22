@@ -1,11 +1,21 @@
 import sharp from "sharp";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import opentype, { type Font } from "opentype.js";
 import type { Copy, DitherSettings } from "./types.js";
 
 const W = 1600, H = 1600;
-const esc = (value: string) => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
-const lines = (value: string) => value.split(/\r?\n/).map(esc);
+const lines = (value: string) => value.split(/\r?\n/);
+
+let geistFontPromise: Promise<Font> | null = null;
+
+function loadGeistFont() {
+  geistFontPromise ??= readFile(resolve(process.cwd(), "public", "Geist-Regular.ttf")).then((file) => {
+    const buffer = file.buffer.slice(file.byteOffset, file.byteOffset + file.byteLength) as ArrayBuffer;
+    return opentype.parse(buffer, { lowMemory: false });
+  });
+  return geistFontPromise;
+}
 
 function bayer(x: number, y: number) {
   const matrix = [[0,8,2,10],[12,4,14,6],[3,11,1,9],[15,7,13,5]];
@@ -30,18 +40,33 @@ async function ditherSvg(image: Buffer, settings: DitherSettings) {
 }
 
 export async function renderPoster(image: Buffer, copy: Copy, settings: DitherSettings) {
-  const photo = await ditherSvg(image, settings);
-  const topic = lines(copy.topic).map((line, i) => `<text x="66" y="${1220 + i * 44}" class="body">${line}</text>`).join("");
-  const [logoFile, fontFile] = await Promise.all([
+  const [photo, logoFile, font] = await Promise.all([
+    ditherSvg(image, settings),
     readFile(resolve(process.cwd(), "public", "slaorange.png")),
-    readFile(resolve(process.cwd(), "public", "Geist-Regular.ttf")),
+    loadGeistFont(),
   ]);
   const logo = logoFile.toString("base64");
-  const geistFont = fontFile.toString("base64");
-  const pill = (text: string, x: number, width: number, anchor = "start") => `<rect x="${anchor === "end" ? x - width : x}" y="39" width="${width}" height="43" rx="22" fill="none" stroke="#222"/><text x="${anchor === "end" ? x - width + 14 : x + 14}" y="68" class="mono">${esc(text)}</text>`;
-  const handleWidth = Math.max(170, copy.handle.length * 17 + 28);
-  const roleWidth = Math.max(170, copy.role.length * 17 + 28);
-  const sponsorWidth = Math.max(140, copy.sponsor.length * 17 + 28);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><style>@font-face{font-family:Geist;src:url(data:font/ttf;base64,${geistFont}) format("truetype");font-weight:400 800}.mono{font-family:Geist;font-size:27px;fill:#222}.name{font-family:Geist;font-size:53px;font-weight:700;fill:#222}.body{font-family:Geist;font-size:33px;font-weight:400;fill:#222}.small{font-family:Geist;font-size:30px;font-weight:400;fill:#222}</style><rect width="1600" height="1600" fill="#eaeaea"/>${pill(copy.handle, 65, handleWidth)}${pill(copy.role, 65 + handleWidth + 8, roleWidth)}${pill(copy.sponsor, 1535, sponsorWidth, "end")}${photo}<text x="65" y="1105" class="name">${esc(copy.name.toUpperCase())}</text><text x="66" y="1172" class="body">${esc(copy.company)}</text>${topic}<image href="data:image/png;base64,${logo}" x="1120" y="988" width="340" height="148" transform="rotate(-4 1120 988)" preserveAspectRatio="none"/><text x="65" y="1544" class="small">${esc(copy.date)}</text><text x="1535" y="1544" text-anchor="end" class="small">${esc(copy.social)}</text></svg>`;
+  const textPath = (text: string, x: number, y: number, size: number, anchor: "start" | "end" = "start", bold = false) => {
+    const width = font.getAdvanceWidth(text, size);
+    const left = anchor === "end" ? x - width : x;
+    const paths: string[] = [];
+    font.forEachGlyph(text, left, y, size, undefined, (glyph, glyphX, glyphY, glyphSize) => {
+      const roundedX = Math.round(glyphX * 1000) / 1000;
+      const roundedY = Math.round(glyphY * 1000) / 1000;
+      const path = glyph.getPath(roundedX, roundedY, glyphSize).toPathData(2);
+      if (path.includes("NaN")) throw new Error(`Geist produjo un trazado inválido para el glifo ${glyph.name}`);
+      if (path) paths.push(`<path d="${path}" fill="#222"${bold ? ' stroke="#222" stroke-width="1.2"' : ""}/>`);
+    });
+    return paths.join("");
+  };
+  const pill = (text: string, x: number, width: number, anchor: "start" | "end" = "start") => {
+    const left = anchor === "end" ? x - width : x;
+    return `<rect x="${left}" y="39" width="${width}" height="43" rx="22" fill="none" stroke="#222"/>${textPath(text, left + 14, 69, 27)}`;
+  };
+  const handleWidth = Math.max(170, font.getAdvanceWidth(copy.handle, 27) + 28);
+  const roleWidth = Math.max(170, font.getAdvanceWidth(copy.role, 27) + 28);
+  const sponsorWidth = Math.max(140, font.getAdvanceWidth(copy.sponsor, 27) + 28);
+  const topic = lines(copy.topic).map((line, i) => textPath(line, 66, 1220 + i * 44, 33)).join("");
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><rect width="1600" height="1600" fill="#eaeaea"/>${pill(copy.handle, 65, handleWidth)}${pill(copy.role, 65 + handleWidth + 8, roleWidth)}${pill(copy.sponsor, 1535, sponsorWidth, "end")}${photo}${textPath(copy.name.toUpperCase(), 65, 1105, 53, "start", true)}${textPath(copy.company, 66, 1172, 33)}${topic}<image href="data:image/png;base64,${logo}" x="1120" y="988" width="340" height="148" transform="rotate(-4 1120 988)" preserveAspectRatio="none"/>${textPath(copy.date, 65, 1544, 30)}${textPath(copy.social, 1535, 1544, 30, "end")}</svg>`;
   return sharp(Buffer.from(svg)).png().toBuffer();
 }

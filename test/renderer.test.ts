@@ -13,4 +13,6 @@ test("renderiza una placa PNG cuadrada", async () => {
   assert.equal(metadata.width, 1600);
   assert.equal(metadata.height, 1600);
   assert.equal(metadata.format, "png");
+  const nameRegion = await sharp(output).extract({ left: 60, top: 1050, width: 650, height: 80 }).greyscale().stats();
+  assert.ok(nameRegion.channels[0].min < 60, "el nombre debe contener trazos oscuros visibles");
 });
