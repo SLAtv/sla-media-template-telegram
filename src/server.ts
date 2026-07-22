@@ -16,8 +16,13 @@ const server = createServer(async (req, res) => {
   if (req.method === "POST" && req.url === "/webhook/telegram") {
     if (secret && req.headers["x-telegram-bot-api-secret-token"] !== secret) { res.writeHead(401); res.end("unauthorized"); return; }
     const chunks: Buffer[] = []; for await (const chunk of req) chunks.push(Buffer.from(chunk));
-    res.writeHead(200); res.end("ok");
-    if (agent) agent.handle(JSON.parse(Buffer.concat(chunks).toString())).catch((error) => console.error(error));
+    try {
+      if (agent) await agent.handle(JSON.parse(Buffer.concat(chunks).toString()));
+      res.writeHead(200); res.end("ok");
+    } catch (error) {
+      console.error(error);
+      res.writeHead(500); res.end("error");
+    }
     return;
   }
   if (req.method === "GET" && req.url === "/") { const html = await readFile(new URL("../../public/index.html", import.meta.url)); res.writeHead(200, { "content-type": "text/html; charset=utf-8" }); res.end(html); return; }
