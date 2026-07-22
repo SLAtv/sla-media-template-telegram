@@ -16,7 +16,10 @@ export class TelegramAgent {
     form.set("reply_markup", JSON.stringify(replyMarkup));
     form.set("photo", new Blob([png as unknown as BlobPart], { type: "image/png" }), "sla-poster.png");
     const res = await fetch(`https://api.telegram.org/bot${this.token}/sendPhoto`, { method: "POST", body: form });
-    if (!res.ok) throw new Error(`Telegram sendPhoto: ${res.status}`);
+    if (!res.ok) {
+      const detail = await res.text();
+      throw new Error(`Telegram sendPhoto: ${res.status} ${detail}`);
+    }
     return res.json();
   }
   private async send(chatId: number, text: string, extra: Record<string, unknown> = {}) { return this.api("sendMessage", { chat_id: chatId, text, ...extra }); }
