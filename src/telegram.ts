@@ -6,6 +6,8 @@ import { Store } from "./store.js";
 type TelegramMessage = { chat: { id: number }; text?: string; photo?: Array<{ file_id: string }> };
 type TelegramUpdate = { message?: TelegramMessage; callback_query?: { id: string; data?: string; message?: TelegramMessage } };
 const DEFAULT_SOCIAL = "@slatv_ @ceiboargentina";
+const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
+const MAX_TEXT_LENGTH = 1_000;
 
 export class TelegramAgent {
   constructor(private token: string, private store: Store, private originalWebUrl: string, private publicUrl: string) {}
@@ -26,7 +28,18 @@ export class TelegramAgent {
   private async send(chatId: number, text: string, extra: Record<string, unknown> = {}) { return this.api("sendMessage", { chat_id: chatId, text, ...extra }); }
   private nextField(copy: Partial<Copy>) { return FIELD_ORDER.find((field) => !copy[field]); }
   private prompt(field: keyof Copy) { return `¿Cuál es el ${FIELD_LABELS[field]}?`; }
-  private async downloadPhoto(fileId: string) { const file = await this.api("getFile", { file_id: fileId }); const path = file.result?.file_path; if (!path) throw new Error("Telegram no devolvió la ruta de la foto"); const response = await fetch(`https://api.telegram.org/file/bot${this.token}/${path}`); return Buffer.from(await response.arrayBuffer()); }
+  private async downloadPhoto(fileId: string) {
+    const file = await this.api("getFile", { file_id: fileId });
+    const path = file.result?.file_path;
+    if (!path) throw new Error("Telegram no devolvió la ruta de la foto");
+    const response = await fetch(`https://api.telegram.org/file/bot${this.token}/${path}`);
+    if (!response.ok) throw new Error(`Telegram download: ${response.status}`);
+    const contentLength = Number(response.headers.get("content-length") ?? 0);
+    if (contentLength > MAX_IMAGE_BYTES) throw new Error("La imagen supera el tamaño permitido");
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.length > MAX_IMAGE_BYTES) throw new Error("La imagen supera el tamaño permitido");
+    return bytes;
+  }
   private keyboard() {
     const row: Array<Record<string, string>> = [{ text: "Cambiar datos", callback_data: "reset" }];
     try {
@@ -46,7 +59,13 @@ export class TelegramAgent {
     if (!message.text) { await this.send(chatId, "Necesito una foto o un texto para continuar."); return; }
     if (!session.photo) { await this.send(chatId, "Primero enviame la foto del invitado."); return; }
     const field = session.awaiting ?? this.nextField(session.copy);
-    if (field && field !== "photo") { session.copy[field] = ["handle", "role", "sponsor", "name"].includes(field) ? message.text.toUpperCase() : message.text; session.awaiting = this.nextField(session.copy) ?? null; session.updatedAt = new Date().toISOString(); this.store.save(session); }
+    if (field && field !== "photo") {
+      if (message.text.length > MAX_TEXT_LENGTH) { await this.send(chatId, `Ese texto es demasiado largo. Usá hasta ${MAX_TEXT_LENGTH} caracteres.`); return; }
+      session.copy[field] = ["handle", "role", "sponsor", "name"].includes(field) ? message.text.toUpperCase() : message.text;
+      session.awaiting = this.nextField(session.copy) ?? null;
+      session.updatedAt = new Date().toISOString();
+      this.store.save(session);
+    }
     if (session.awaiting) { await this.send(chatId, this.prompt(session.awaiting as keyof Copy)); return; }
     const copy = session.copy as Copy;
     const png = await renderPoster(session.photo, copy, DEFAULT_DITHER);

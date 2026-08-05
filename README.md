@@ -43,8 +43,8 @@ Variables disponibles:
 | Variable | Descripción |
 | --- | --- |
 | `PORT` | Puerto del servidor local. |
-| `TELEGRAM_BOT_TOKEN` | Token privado entregado por BotFather. |
-| `TELEGRAM_WEBHOOK_SECRET` | Secreto usado para validar los webhooks. |
+| `TELEGRAM_BOT_TOKEN` | Token privado entregado por BotFather. Obligatorio. |
+| `TELEGRAM_WEBHOOK_SECRET` | Secreto usado para validar los webhooks. Obligatorio. |
 | `PUBLIC_AGENT_URL` | URL pública del agente. |
 | `ORIGINAL_WEB_URL` | URL HTTPS del editor web manual. |
 | `DATABASE_PATH` | Ruta de la base SQLite. |
@@ -61,7 +61,7 @@ curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
 
 Puede desplegarse en Vercel o como un servicio Node persistente. Configurá las variables de `.env.example` en el proveedor y registrá el webhook de Telegram.
 
-SQLite en `/tmp` funciona como almacenamiento efímero en entornos serverless. Para conservar sesiones entre reinstancias se recomienda usar un volumen persistente o reemplazar el store por una base administrada.
+SQLite en `/tmp` funciona como almacenamiento efímero en entornos serverless. Para conservar sesiones entre reinstancias se recomienda usar un volumen persistente o reemplazar el store por una base administrada. El servidor rechaza el inicio si faltan el token del bot o el secreto del webhook.
 
 ## Seguridad
 
